@@ -1,75 +1,75 @@
-const puppeteer = require("puppeteer-core");
-const chromium = require("@sparticuz/chromium");
-const cheerio = require("cheerio");
+const axios = require("axios");
 
-const instagramCrawl = async (username) => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: await chromium.executablePath(),
-    args: ["--no-sandbox"],
-  });
-  var page = await browser.newPage();
+const eventHandler = {
+  running: async (event) => {
+    const profile = await getProfileInstance.get("/", {
+      params: {
+        query_hash: "e769aa130647d2354c40ea6a439bfc08",
+        variables: JSON.stringify({
+          id: event.user_id,
+          first: 1,
+        }),
+      },
+    });
+    console.log(JSON.stringify(profile.data.data));
+  },
+  fail: async (event) => {},
+  first: async (event) => {
+    const userId = await getUserIdInstance.get("/", {
+      params: {
+        username: event.username,
+      },
+    });
+    event.user_id = userId;
+    console.log(userId);
+    return await eventHandler[event.state](event);
+  },
+};
 
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36"
+const getUserIdInstance = axios.create({
+  baseURL: `https://i.instagram.com/api/v1/users/web_profile_info`,
+  headers: {
+    "X-IG-App-ID": "936619743392459",
+    "User-Agent":
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.79 Safari/537.36",
+    Accept: "*/*",
+  },
+});
+
+const getProfileInstance = axios.create({
+  baseURL: `https://www.instagram.com/graphql/query`,
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.79 Safari/537.36",
+    Accept: "*/*",
+  },
+});
+
+const setState = (event, state) => {
+  event.state = state;
+};
+
+const initialize = (event) => {
+  getUserIdInstance.interceptors.response.use(
+    (response) => {
+      console.log(response.status);
+      let state = "running";
+      if (!response.data) state = "fail";
+      setState(event, state);
+      return state == "running" ? response.data.data.user.id : null;
+    },
+    (error) => {
+      setState(event, "fail");
+      return null;
+    }
   );
-  await page.evaluate("navigator.userAgent");
-  var request = await page.goto(
-    `https://www.instagram.com/${username}/p/C345sfkpgMm/`
-  );
-
-  if (request.status == 404) {
-    browser.close();
-    console.log("This account is not exist");
-    return "This account is not exist";
-  } else if (request.status == 429) {
-    browser.close();
-    console.log("Too many requests");
-    return "Too many requests";
-  } else {
-    var page_content = await page.content();
-    var $ = await cheerio.load(page_content);
-    var content = $("body script").html();
-    browser.close();
-    getData = /window._sharedData = (.*);/g;
-    data = JSON.parse(getData.exec(content)[1]);
-    profile = JSON.parse(
-      JSON.stringify(data.entry_data["ProfilePage"][0]["graphql"]["user"])
-    );
-    mediaCount = profile.edge_owner_to_timeline_media["count"];
-
-    media = profile.edge_owner_to_timeline_media.edges.map((x) => ({
-      shortcode: x.node["shortcode"],
-      display_url: x.node["display_url"],
-      numberLikes: x.node.edge_liked_by["count"],
-      numberComments: x.node.edge_media_to_comment["count"],
-      mentions: x.node.edge_media_to_tagged_user.edges.map(
-        (y) => y.node.user["username"]
-      ),
-      location: x.node["location"],
-      caption: x.node.edge_media_to_caption.edges.map((z) => z.node["text"]),
-    }));
-
-    var userInfo = {
-      username: profile["username"],
-      full_name: profile["full_name"],
-      profile_picture: profile["profile_pic_url"],
-      profile_picture_hd: profile["profile_pic_url_hd"],
-      is_private: profile["is_private"],
-      id: profile["id"],
-      bio: profile.biography,
-      media: profile.edge_owner_to_timeline_media["count"],
-      followed_by: profile.edge_followed_by["count"],
-      follows: profile.edge_follow["count"],
-      website: profile.external_url,
-      images: media,
-    };
-    return userInfo;
-  }
 };
 exports.handler = async (event) => {
   console.log("lambda invoked");
-  console.log(await instagramCrawl("timesapgu"));
+  console.log(JSON.stringify(event));
+  initialize(event);
+  await eventHandler[event.state](event);
+  console.log("current state", event.state);
   const response = {
     statusCode: 200,
     body: JSON.stringify("Hello from Lambda!"),

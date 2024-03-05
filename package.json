@@ -9,6 +9,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "puppeteer-core": "^22.3.0"
+    "axios": "^1.6.7"
   }
 }
